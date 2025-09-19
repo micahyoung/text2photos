@@ -553,18 +553,14 @@ LIMIT 10;
 ]
 
 
-def get_system_prompt(num_examples=3):
-    """Returns the system prompt for the AI model with randomly selected examples.
-
-    Args:
-        num_examples: Number of examples to include (default: 3)
+def get_system_prompt():
     """
-    # Select random examples
-    selected_items = random.sample(EXAMPLE_QA_PAIRS, min(num_examples, len(EXAMPLE_QA_PAIRS)))
+    Returns the system prompt for the AI model with randomly selected examples.
+    """
 
     # Build examples string
     examples = []
-    for qa in selected_items:
+    for qa in EXAMPLE_QA_PAIRS:
         examples.append(f"Q: {qa['question']}\nA: {qa['answer']}")
 
     examples_text = "\n\n".join(examples)
