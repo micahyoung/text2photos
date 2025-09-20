@@ -26,8 +26,24 @@ pip install -e .
 
 ## Usage
 
+### Basic usage (creates album "text2photos")
 ```bash
-text2photos
+text2photos -p "photos from NYC with no face masks"
+```
+
+### Create custom album
+```bash
+text2photos -p "highest aesthetic photos of 2024" -a "best_2024_photos"
+```
+
+### Export to directory
+```bash
+text2photos -p "photos of Mom from vacation" -d ./mom_vacation_photos
+```
+
+### With custom API settings
+```bash
+text2photos -p "night photos from NYC" --api-base http://localhost:11434/v1 --model qwen3-coder:30b
 ```
 
 ## License
