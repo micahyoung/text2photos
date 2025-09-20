@@ -782,9 +782,9 @@ Examples:
 {get_help_examples(3)}
 
 Environment variables:
-  OPENAI_API_BASE: API base URL (default: http://desktop.local:11434/v1)
+  OPENAI_API_BASE: API base URL (default: http://localhost:11434/v1)
   OPENAI_API_KEY: API key (default: ollama)
-  OPENAI_MODEL: Model name (default: qwen3-coder-ctx)
+  OPENAI_MODEL: Model name (default: qwen3-coder:30b)
         """
 
     parser = argparse.ArgumentParser(
