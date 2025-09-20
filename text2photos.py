@@ -9,11 +9,12 @@ import re
 import sqlite3
 import os
 import random
+import subprocess
 import pandas as pd
 from pathlib import Path
 from openai import OpenAI
 import osxphotos
-from osxphotos import ExportOptions, PhotoExporter
+from osxphotos import ExportOptions, PhotoExporter, PhotosAlbum
 
 # Example Q&A pairs for the AI model
 EXAMPLE_QA_PAIRS = [
@@ -553,6 +554,35 @@ LIMIT 10;
 ]
 
 
+def delete_album_if_exists(album_name):
+    """
+    Delete an album using AppleScript if it exists.
+
+    Args:
+        album_name: Name of the album to delete
+
+    Returns:
+        bool: True if album was deleted or didn't exist, False if error occurred
+    """
+    delete_script = f'''
+    tell application "Photos"
+        try
+            delete album "{album_name}"
+            return "deleted"
+        on error errMsg
+            return "not_found"
+        end try
+    end tell
+    '''
+
+    try:
+        result = subprocess.run(['osascript', '-e', delete_script],
+                               capture_output=True, text=True, check=False)
+        return result.stdout.strip() in ["deleted", "not_found"]
+    except Exception:
+        return False
+
+
 def get_system_prompt():
     """
     Returns the system prompt for the AI model with randomly selected examples.
@@ -578,13 +608,14 @@ These are example responses:
 """
 
 
-def text_to_photo(prompt, output_dir, api_base="http://localhost:11434/v1", api_key="ollama", model="qwen3-coder-ctx"):
+def text_to_photo(prompt, output_dir=None, album_name=None, api_base="http://localhost:11434/v1", api_key="ollama", model="qwen3-coder-ctx"):
     """
     Convert natural language query to SQL and export matching photos.
 
     Args:
         prompt: Natural language query about photos
-        output_dir: Directory to export photos to
+        output_dir: Directory to export photos to (mutually exclusive with album_name)
+        album_name: Album name to add photos to (mutually exclusive with output_dir)
         api_base: OpenAI API base URL
         api_key: API key for authentication
         model: Model name to use
@@ -651,45 +682,69 @@ def text_to_photo(prompt, output_dir, api_base="http://localhost:11434/v1", api_
         print("No photos found.")
         return
 
-    # Create output directory
-    output_path = Path(output_dir)
-    output_path.mkdir(parents=True, exist_ok=True)
-
     print(f"\nFound {len(photos)} photos")
-    print(f"Exporting to: {output_path.absolute()}")
-    print("-" * 50)
 
-    # Export photos
-    exported_count = 0
-    for i, photo in enumerate(photos, 1):
-        if not photo:
-            continue
+    if album_name:
+        # Add photos to album
+        print(f"Adding to album: {album_name}")
+        print("-" * 50)
 
-        # Define export options
-        options = ExportOptions(
-            convert_to_jpeg=True,
-            jpeg_quality=0.9,
-            download_missing=True,
-            overwrite=True
-        )
-
-        exporter = PhotoExporter(photo)
-        result = exporter.export(output_path, options=options)
-
-        if result.converted_to_jpeg:
-            file_path = result.converted_to_jpeg[0]
-            exported_count += 1
-            print(f"[{i}/{len(photos)}] Exported: {file_path}")
-        elif result.exported:
-            file_path = result.exported[0]
-            exported_count += 1
-            print(f"[{i}/{len(photos)}] Exported: {file_path}")
+        # Delete existing album if it exists
+        if delete_album_if_exists(album_name):
+            print(f"Removed existing album '{album_name}' if it existed")
         else:
-            print(f"[{i}/{len(photos)}] Failed to export photo: {photo.uuid}")
+            print(f"Warning: Could not delete existing album '{album_name}'")
 
-    print("-" * 50)
-    print(
-        f"\nExport complete: {exported_count}/{len(photos)} photos exported to {output_path.absolute()}")
+        # Create new album
+        album = PhotosAlbum(album_name)
+
+        # Add all photos to album
+        album.extend(photos)
+        print(f"Added {len(photos)} photos to album '{album_name}'")
+
+    else:
+        # Export to directory
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+
+        print(f"Exporting to: {output_path.absolute()}")
+        print("-" * 50)
+
+    if not album_name:
+        # Export photos
+        exported_count = 0
+        for i, photo in enumerate(photos, 1):
+            if not photo:
+                continue
+
+            # Define export options
+            options = ExportOptions(
+                convert_to_jpeg=True,
+                jpeg_quality=0.9,
+                download_missing=True,
+                overwrite=True
+            )
+
+            exporter = PhotoExporter(photo)
+            result = exporter.export(output_path, options=options)
+
+            if result.converted_to_jpeg:
+                file_path = result.converted_to_jpeg[0]
+                exported_count += 1
+                print(f"[{i}/{len(photos)}] Exported: {file_path}")
+            elif result.exported:
+                file_path = result.exported[0]
+                exported_count += 1
+                print(f"[{i}/{len(photos)}] Exported: {file_path}")
+            else:
+                print(f"[{i}/{len(photos)}] Failed to export photo: {photo.uuid}")
+
+        print("-" * 50)
+        print(
+            f"\nExport complete: {exported_count}/{len(photos)} photos exported to {output_path.absolute()}")
+    else:
+        print("-" * 50)
+        print(f"\nAlbum update complete: {len(photos)} photos in album '{album_name}'")
 
     # Display additional info from dataframe if available
     if len(df.columns) > 1:
@@ -703,11 +758,20 @@ def get_help_examples(num_examples=3):
     selected_items = random.sample(EXAMPLE_QA_PAIRS, min(num_examples, len(EXAMPLE_QA_PAIRS)))
 
     examples = []
-    for qa in selected_items:
-        # Create a sanitized directory name from the question
-        dir_name = qa['question'].lower().replace(
-            '?', '').replace(' ', '_').replace(',', '')[:30]
-        examples.append(f'  %(prog)s -p "{qa["question"]}" -d ./{dir_name}')
+    for i, qa in enumerate(selected_items):
+        if i == 0:
+            # First example uses album (default)
+            examples.append(f'  %(prog)s -p "{qa["question"]}"')
+        elif i == 1:
+            # Second example uses album with custom name
+            album_name = qa['question'].lower().replace(
+                '?', '').replace(' ', '_').replace(',', '')[:20]
+            examples.append(f'  %(prog)s -p "{qa["question"]}" -a "{album_name}"')
+        else:
+            # Third example uses directory export
+            dir_name = qa['question'].lower().replace(
+                '?', '').replace(' ', '_').replace(',', '')[:30]
+            examples.append(f'  %(prog)s -p "{qa["question"]}" -d ./{dir_name}')
 
     return "\n".join(examples)
 
@@ -736,11 +800,21 @@ Environment variables:
         help='Natural language prompt to search for photos'
     )
 
-    parser.add_argument(
+    # Make -a and -d mutually exclusive
+    output_group = parser.add_mutually_exclusive_group()
+
+    output_group.add_argument(
+        '-a', '--album',
+        type=str,
+        nargs='?',
+        const='text2photos',
+        help='Album name to add photos to (default: text2photos). This is the default if neither -a nor -d is specified.'
+    )
+
+    output_group.add_argument(
         '-d', '--directory',
         type=str,
-        required=True,
-        help='Output directory for exported photos'
+        help='Output directory for exported photos (alternative to album)'
     )
 
     parser.add_argument(
@@ -766,10 +840,15 @@ Environment variables:
 
     args = parser.parse_args()
 
+    # Default to album mode if neither specified
+    if not args.directory and args.album is None:
+        args.album = 'text2photos'
+
     try:
         text_to_photo(
             prompt=args.prompt,
             output_dir=args.directory,
+            album_name=args.album,
             api_base=args.api_base,
             api_key=args.api_key,
             model=args.model
