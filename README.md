@@ -38,7 +38,7 @@ text2photos -p "highest aesthetic photos of 2024" -a "best_2024_photos"
 
 ### Export to directory
 ```bash
-text2photos -p "photos of Mom from vacation" -d ./mom_vacation_photos
+text2photos -p "photos of Mom from vacation" -o ./mom_vacation_photos
 ```
 
 ### With custom API settings

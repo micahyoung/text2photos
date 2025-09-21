@@ -5,8 +5,7 @@ Converts natural language queries to SQL queries for Apple Photos database.
 """
 
 import argparse
-import re
-import sqlite3
+import itertools
 import os
 import random
 import subprocess
@@ -16,133 +15,8 @@ from openai import OpenAI
 import osxphotos
 from osxphotos import ExportOptions, PhotoExporter, PhotosAlbum
 
-# Example Q&A pairs for the AI model
-EXAMPLE_QA_PAIRS = [
-    {
-        "question": "What is the table schema for ZPERSON?",
-        "answer": """
-```sql
-CREATE TABLE ZPERSON (
-    Z_PK INTEGER PRIMARY KEY,
-    Z_ENT INTEGER,
-    Z_OPT INTEGER,
-    ZAGETYPE INTEGER,
-    ZCLOUDDELETESTATE INTEGER,
-    ZCLOUDLOCALSTATE INTEGER,
-    ZCLOUDVERIFIEDTYPE INTEGER,
-    ZDETECTIONTYPE INTEGER,
-    ZFACECOUNT INTEGER,
-    ZGENDERTYPE INTEGER,
-    ZINPERSONNAMINGMODEL INTEGER,
-    ZKEYFACEPICKSOURCE INTEGER,
-    ZMANUALORDER INTEGER,
-    ZQUESTIONTYPE INTEGER,
-    ZSUGGESTEDFORCLIENTTYPE INTEGER,
-    ZTYPE INTEGER,
-    ZVERIFIEDTYPE INTEGER,
-    ZASSOCIATEDFACEGROUP INTEGER,
-    ZKEYFACE INTEGER,
-    ZMERGETARGETPERSON INTEGER,
-    ZDISPLAYNAME VARCHAR,
-    ZFULLNAME VARCHAR,
-    ZPERSONUUID VARCHAR,
-    ZPERSONURI VARCHAR,
-    ZCONTACTMATCHINGDICTIONARY BLOB,
-    ZMERGECANDIDATECONFIDENCE FLOAT,
-    ZSHAREPARTICIPANT INTEGER,
-    ZASSETSORTORDER INTEGER,
-    ZMDID VARCHAR,
-    ZCLOUDDETECTIONTYPE INTEGER,
-    ZISMECONFIDENCE FLOAT
-)
-```
-""",
-    },
-    {
-        "question": "What is the table schema for ZDETECTEDFACE?",
-        "answer": """
-```sql
-CREATE TABLE ZDETECTEDFACE (
-    Z_PK INTEGER PRIMARY KEY,
-    Z_ENT INTEGER,
-    Z_OPT INTEGER,
-    ZAGETYPE INTEGER,
-    ZASSETVISIBLE INTEGER,
-    ZCLOUDLOCALSTATE INTEGER,
-    ZCLOUDNAMESOURCE INTEGER,
-    ZCLUSTERSEQUENCENUMBER INTEGER,
-    ZCONFIRMEDFACECROPGENERATIONSTATE INTEGER,
-    ZDETECTIONTYPE INTEGER,
-    ZETHNICITYTYPE INTEGER,
-    ZEYEMAKEUPTYPE INTEGER,
-    ZEYESSTATE INTEGER,
-    ZFACEALGORITHMVERSION INTEGER,
-    ZFACEEXPRESSIONTYPE INTEGER,
-    ZFACIALHAIRTYPE INTEGER,
-    ZGAZETYPE INTEGER,
-    ZGENDERTYPE INTEGER,
-    ZGLASSESTYPE INTEGER,
-    ZHAIRCOLORTYPE INTEGER,
-    ZHAIRTYPE INTEGER,
-    ZHASFACEMASK INTEGER,
-    ZHASSMILE INTEGER,
-    ZHEADGEARTYPE INTEGER,
-    ZHIDDEN INTEGER,
-    ZISINTRASH INTEGER,
-    ZISLEFTEYECLOSED INTEGER,
-    ZISRIGHTEYECLOSED INTEGER,
-    ZLIPMAKEUPTYPE INTEGER,
-    ZMANUAL INTEGER,
-    ZNAMESOURCE INTEGER,
-    ZPOSETYPE INTEGER,
-    ZQUALITYMEASURE INTEGER,
-    ZSKINTONETYPE INTEGER,
-    ZSMILETYPE INTEGER,
-    ZSOURCEHEIGHT INTEGER,
-    ZSOURCEWIDTH INTEGER,
-    ZTRAININGTYPE INTEGER,
-    ZVIPMODELTYPE INTEGER,
-    ZASSETFORFACE INTEGER,
-    ZFACECROP INTEGER,
-    ZFACEGROUP INTEGER,
-    ZFACEGROUPBEINGKEYFACE INTEGER,
-    ZFACEPRINT INTEGER,
-    ZPERSONFORFACE INTEGER,
-    ZPERSONBEINGKEYFACE INTEGER,
-    ZADJUSTMENTVERSION TIMESTAMP,
-    ZBLURSCORE FLOAT,
-    ZBODYCENTERX FLOAT,
-    ZBODYCENTERY FLOAT,
-    ZBODYHEIGHT FLOAT,
-    ZBODYWIDTH FLOAT,
-    ZCENTERX FLOAT,
-    ZCENTERY FLOAT,
-    ZGAZECENTERX FLOAT,
-    ZGAZECENTERY FLOAT,
-    ZPOSEYAW FLOAT,
-    ZQUALITY FLOAT,
-    ZROLL FLOAT,
-    ZSIZE FLOAT,
-    ZGROUPINGIDENTIFIER VARCHAR,
-    ZMASTERIDENTIFIER VARCHAR,
-    ZUUID VARCHAR,
-    ZVUOBSERVATIONID INTEGER,
-    ZASSETFORTORSO INTEGER,
-    ZASSETFORTEMPORALDETECTEDFACES INTEGER,
-    ZPERSONFORTORSO INTEGER,
-    ZPERSONFORTEMPORALDETECTEDFACES INTEGER,
-    ZGAZECONFIDENCE FLOAT,
-    ZGAZERECTSTRING VARCHAR,
-    ZGAZEANGLE FLOAT,
-    ZSTARTTIME FLOAT,
-    ZDURATION FLOAT
-)
-```
-""",
-    },
-    {
-        "question": "What is the table schema for ZASSET?",
-        "answer": """
+DDLS = [
+    """
 ```sql
 CREATE TABLE ZASSET (
     Z_PK INTEGER PRIMARY KEY,
@@ -280,12 +154,125 @@ CREATE TABLE ZASSET (
 )
 ```
 """,
-    },
-    {
-        "question": "What is the table schema for ZCOMPUTEDASSETATTRIBUTES?",
-        "answer": """
+    """
 ```sql
-CREATE TABLE ZCOMPUTEDASSETATTRIBUTES ( 
+CREATE TABLE ZPERSON (
+    Z_PK INTEGER PRIMARY KEY,
+    Z_ENT INTEGER,
+    Z_OPT INTEGER,
+    ZAGETYPE INTEGER,
+    ZCLOUDDELETESTATE INTEGER,
+    ZCLOUDLOCALSTATE INTEGER,
+    ZCLOUDVERIFIEDTYPE INTEGER,
+    ZDETECTIONTYPE INTEGER,
+    ZFACECOUNT INTEGER,
+    ZGENDERTYPE INTEGER,
+    ZINPERSONNAMINGMODEL INTEGER,
+    ZKEYFACEPICKSOURCE INTEGER,
+    ZMANUALORDER INTEGER,
+    ZQUESTIONTYPE INTEGER,
+    ZSUGGESTEDFORCLIENTTYPE INTEGER,
+    ZTYPE INTEGER,
+    ZVERIFIEDTYPE INTEGER,
+    ZASSOCIATEDFACEGROUP INTEGER,
+    ZKEYFACE INTEGER,
+    ZMERGETARGETPERSON INTEGER,
+    ZDISPLAYNAME VARCHAR,
+    ZFULLNAME VARCHAR,
+    ZPERSONUUID VARCHAR,
+    ZPERSONURI VARCHAR,
+    ZCONTACTMATCHINGDICTIONARY BLOB,
+    ZMERGECANDIDATECONFIDENCE FLOAT,
+    ZSHAREPARTICIPANT INTEGER,
+    ZASSETSORTORDER INTEGER,
+    ZMDID VARCHAR,
+    ZCLOUDDETECTIONTYPE INTEGER,
+    ZISMECONFIDENCE FLOAT
+)
+```
+""",
+    """
+```sql
+CREATE TABLE ZDETECTEDFACE (
+    Z_PK INTEGER PRIMARY KEY,
+    Z_ENT INTEGER,
+    Z_OPT INTEGER,
+    ZAGETYPE INTEGER,
+    ZASSETVISIBLE INTEGER,
+    ZCLOUDLOCALSTATE INTEGER,
+    ZCLOUDNAMESOURCE INTEGER,
+    ZCLUSTERSEQUENCENUMBER INTEGER,
+    ZCONFIRMEDFACECROPGENERATIONSTATE INTEGER,
+    ZDETECTIONTYPE INTEGER,
+    ZETHNICITYTYPE INTEGER,
+    ZEYEMAKEUPTYPE INTEGER,
+    ZEYESSTATE INTEGER,
+    ZFACEALGORITHMVERSION INTEGER,
+    ZFACEEXPRESSIONTYPE INTEGER,
+    ZFACIALHAIRTYPE INTEGER,
+    ZGAZETYPE INTEGER,
+    ZGENDERTYPE INTEGER,
+    ZGLASSESTYPE INTEGER,
+    ZHAIRCOLORTYPE INTEGER,
+    ZHAIRTYPE INTEGER,
+    ZHASFACEMASK INTEGER,
+    ZHASSMILE INTEGER,
+    ZHEADGEARTYPE INTEGER,
+    ZHIDDEN INTEGER,
+    ZISINTRASH INTEGER,
+    ZISLEFTEYECLOSED INTEGER,
+    ZISRIGHTEYECLOSED INTEGER,
+    ZLIPMAKEUPTYPE INTEGER,
+    ZMANUAL INTEGER,
+    ZNAMESOURCE INTEGER,
+    ZPOSETYPE INTEGER,
+    ZQUALITYMEASURE INTEGER,
+    ZSKINTONETYPE INTEGER,
+    ZSMILETYPE INTEGER,
+    ZSOURCEHEIGHT INTEGER,
+    ZSOURCEWIDTH INTEGER,
+    ZTRAININGTYPE INTEGER,
+    ZVIPMODELTYPE INTEGER,
+    ZASSETFORFACE INTEGER,
+    ZFACECROP INTEGER,
+    ZFACEGROUP INTEGER,
+    ZFACEGROUPBEINGKEYFACE INTEGER,
+    ZFACEPRINT INTEGER,
+    ZPERSONFORFACE INTEGER,
+    ZPERSONBEINGKEYFACE INTEGER,
+    ZADJUSTMENTVERSION TIMESTAMP,
+    ZBLURSCORE FLOAT,
+    ZBODYCENTERX FLOAT,
+    ZBODYCENTERY FLOAT,
+    ZBODYHEIGHT FLOAT,
+    ZBODYWIDTH FLOAT,
+    ZCENTERX FLOAT,
+    ZCENTERY FLOAT,
+    ZGAZECENTERX FLOAT,
+    ZGAZECENTERY FLOAT,
+    ZPOSEYAW FLOAT,
+    ZQUALITY FLOAT,
+    ZROLL FLOAT,
+    ZSIZE FLOAT,
+    ZGROUPINGIDENTIFIER VARCHAR,
+    ZMASTERIDENTIFIER VARCHAR,
+    ZUUID VARCHAR,
+    ZVUOBSERVATIONID INTEGER,
+    ZASSETFORTORSO INTEGER,
+    ZASSETFORTEMPORALDETECTEDFACES INTEGER,
+    ZPERSONFORTORSO INTEGER,
+    ZPERSONFORTEMPORALDETECTEDFACES INTEGER,
+    ZGAZECONFIDENCE FLOAT,
+    ZGAZERECTSTRING VARCHAR,
+    ZGAZEANGLE FLOAT,
+    ZSTARTTIME FLOAT,
+    ZDURATION FLOAT
+)
+```
+""",
+    """
+```sql
+CREATE TABLE ZCOMPUTEDASSETATTRIBUTES (
     Z_PK INTEGER PRIMARY KEY,
     Z_ENT INTEGER,
     Z_OPT INTEGER,
@@ -313,10 +300,13 @@ CREATE TABLE ZCOMPUTEDASSETATTRIBUTES (
     ZWELLCHOSENSUBJECTSCORE FLOAT,
     ZWELLFRAMEDSUBJECTSCORE FLOAT,
     ZWELLTIMEDSHOTSCORE FLOAT
-);
+)
 ```
-""",
-    },
+"""
+]
+
+# Example Q&A pairs for the AI model
+EXAMPLE_QA_PAIRS = [
     {
         "question": "Which photos are from NYC with no face masks?",
         "answer": """
@@ -577,38 +567,56 @@ def delete_album_if_exists(album_name):
 
     try:
         result = subprocess.run(['osascript', '-e', delete_script],
-                               capture_output=True, text=True, check=False)
+                                capture_output=True, text=True, check=False)
         return result.stdout.strip() in ["deleted", "not_found"]
     except Exception:
         return False
 
 
-def get_system_prompt():
+def get_system_prompt(selected_examples=None, selected_ddls=None):
     """
-    Returns the system prompt for the AI model with randomly selected examples.
+    Returns the system prompt for the AI model with selected examples and DDLs.
+
+    Args:
+        selected_examples: List of example indices to include, or None for all
+        selected_ddls: List of DDL indices to include, or None for all
     """
+    if selected_examples is None:
+        selected_examples = range(len(EXAMPLE_QA_PAIRS))
+    if selected_ddls is None:
+        selected_ddls = range(len(DDLS))
 
     # Build examples string
     examples = []
-    for qa in EXAMPLE_QA_PAIRS:
+    for idx in selected_examples:
+        qa = EXAMPLE_QA_PAIRS[idx]
         examples.append(f"Q: {qa['question']}\nA: {qa['answer']}")
 
     examples_text = "\n\n".join(examples)
 
+    # Format DDLs with SQL code blocks - only selected ones
+    selected_ddls_content = [DDLS[i] for i in selected_ddls]
+    ddls_formatted = "\n\n".join(selected_ddls_content)
+
     return f"""
 You are a photo search assistant for Apple Photos using the SQLite database to find photos for the user. You are using the Photo database in `~/Pictures/Photos Library.photoslibrary/database/Photos.sqlite`
 
-Answer the user's question with a SQLite query that will fetch their required data, including the `ZUUID` for any photo.
+Answer the user's question with a SQLite query that will fetch their required data.
 
 Rules:
 * Only answer with SQL, do not include instructions or explanations
+* Join any tables you need to get the data
+* Always include the `ZUUID` column in your SELECT statement
 
-These are example responses:
+Table DDLS:
+{ddls_formatted}
+
+Example responses:
 {examples_text}
 """
 
 
-def text_to_photo(prompt, output_dir=None, album_name=None, api_base="http://localhost:11434/v1", api_key="ollama", model="qwen3-coder-ctx"):
+def text_to_photo(prompt, output_dir=None, album_name=None, api_base="http://localhost:11434/v1", api_key="ollama", model="qwen3-coder-ctx", num_examples=-1, num_ddls=-1):
     """
     Convert natural language query to SQL and export matching photos.
 
@@ -619,62 +627,110 @@ def text_to_photo(prompt, output_dir=None, album_name=None, api_base="http://loc
         api_base: OpenAI API base URL
         api_key: API key for authentication
         model: Model name to use
+        num_examples: Number of examples to use in combinations (-1 means all)
+        num_ddls: Number of DDLs to use in combinations (-1 means all)
     """
+
     # Initialize OpenAI client
-    client = OpenAI(base_url=api_base, api_key=api_key)
+    client = OpenAI(base_url=api_base, api_key=api_key, max_retries=0)
 
     # Initialize Photos database
     photos_path = os.path.expanduser("~/Pictures/Photos Library.photoslibrary")
     photosdb = osxphotos.PhotosDB(photos_path)
 
-    # Get system prompt
-    system_prompt = get_system_prompt()
+    # Determine batch sizes
+    if num_examples == -1:
+        example_batch_size = len(EXAMPLE_QA_PAIRS)
+    else:
+        example_batch_size = min(num_examples, len(EXAMPLE_QA_PAIRS))
 
-    # Prepare user prompt
-    user_prompt = f"Q: {prompt}\nA: "
+    if num_ddls == -1:
+        ddl_batch_size = len(DDLS)
+    else:
+        ddl_batch_size = min(num_ddls, len(DDLS))
 
-    # Create messages for API
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt}
-    ]
+    # Generate all combinations of both DDLs and examples
+    example_indices = list(range(len(EXAMPLE_QA_PAIRS)))
+    ddl_indices = list(range(len(DDLS)))
+
+    example_combinations = list(
+        itertools.combinations(example_indices, example_batch_size))
+    ddl_combinations = list(itertools.combinations(ddl_indices, ddl_batch_size))
+
+    # Create all combinations of DDL and example pairs
+    combinations = list(itertools.product(
+        ddl_combinations, example_combinations))
 
     print(f"Querying AI model: {model}")
-    print(f"Prompt: {prompt}\n")
+    print(f"Prompt: {prompt}")
+    print(
+        f"Trying {len(combinations)} combination(s) of {ddl_batch_size} DDL(s) and {example_batch_size} example(s)\n")
 
-    # Get response from API
-    response = client.chat.completions.create(
-        model=model,
-        messages=messages,
-        max_tokens=2048,
-        temperature=0
-    )
+    # Try each combination until we find a valid query with results
+    valid_result = None
+    valid_sql = None
+    valid_df = None
 
-    output = response.choices[0].message.content
-    raw_sql = output.strip().removeprefix("```sql").removesuffix("```").strip()
+    for i, (ddl_combo, example_combo) in enumerate(combinations, 1):
+        print(
+            f"Attempt {i}/{len(combinations)}: Using DDLs {list(ddl_combo)} and examples {list(example_combo)}")
 
-    print("Generated SQL:")
+        # Get system prompt with selected DDLs and examples
+        system_prompt = get_system_prompt(example_combo, ddl_combo)
+
+        # Prepare user prompt
+        user_prompt = f"Q: {prompt}\nA: "
+
+        # Create messages for API
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+
+        # Get response from API
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=0
+            )
+
+            output = response.choices[0].message.content
+            raw_sql = output.strip().removeprefix("```sql").removesuffix("```").strip()
+
+            # Try to execute the SQL query
+            df = pd.read_sql_query(raw_sql, photosdb._db_connection)
+
+            # Check if we have results and ZUUID column
+            if not df.empty and 'ZUUID' in df.columns:
+                print(f"  ✓ Valid SQL with {len(df)} results found")
+                valid_result = True
+                valid_sql = raw_sql
+                valid_df = df
+                break
+            elif df.empty:
+                print(f"  ✗ Query returned no results")
+            else:
+                print(f"  ✗ Query missing ZUUID column")
+
+        except Exception as e:
+            print(f"  ✗ Error: {str(e)}")
+            continue
+
+    if not valid_result:
+        print("\nNo valid query found after trying all combinations.")
+        return
+
+    # Use the valid query result
+    print("\nUsing successful query:")
     print("-" * 50)
-    print(raw_sql)
+    print(valid_sql)
     print("-" * 50)
     print()
 
-    # Execute SQL query
-    try:
-        df = pd.read_sql_query(raw_sql, photosdb._db_connection)
-    except Exception as e:
-        print(f"Error executing SQL: {e}")
-        return
-
-    if df.empty:
-        print("No photos found matching the query.")
-        return
+    df = valid_df
 
     # Get photo UUIDs
-    if 'ZUUID' not in df.columns:
-        print("Error: Query must return ZUUID column")
-        return
-
     uuids = df.ZUUID
     photos = photosdb.photos_by_uuid(uuids)
 
@@ -744,7 +800,8 @@ def text_to_photo(prompt, output_dir=None, album_name=None, api_base="http://loc
             f"\nExport complete: {exported_count}/{len(photos)} photos exported to {output_path.absolute()}")
     else:
         print("-" * 50)
-        print(f"\nAlbum update complete: {len(photos)} photos in album '{album_name}'")
+        print(
+            f"\nAlbum update complete: {len(photos)} photos in album '{album_name}'")
 
     # Display additional info from dataframe if available
     if len(df.columns) > 1:
@@ -755,7 +812,8 @@ def text_to_photo(prompt, output_dir=None, album_name=None, api_base="http://loc
 def get_help_examples(num_examples=3):
     """Generate random example commands for help output."""
     # Select random examples for help
-    selected_items = random.sample(EXAMPLE_QA_PAIRS, min(num_examples, len(EXAMPLE_QA_PAIRS)))
+    selected_items = random.sample(
+        EXAMPLE_QA_PAIRS, min(num_examples, len(EXAMPLE_QA_PAIRS)))
 
     examples = []
     for i, qa in enumerate(selected_items):
@@ -766,12 +824,14 @@ def get_help_examples(num_examples=3):
             # Second example uses album with custom name
             album_name = qa['question'].lower().replace(
                 '?', '').replace(' ', '_').replace(',', '')[:20]
-            examples.append(f'  %(prog)s -p "{qa["question"]}" -a "{album_name}"')
+            examples.append(
+                f'  %(prog)s -p "{qa["question"]}" -a "{album_name}"')
         else:
             # Third example uses directory export
             dir_name = qa['question'].lower().replace(
                 '?', '').replace(' ', '_').replace(',', '')[:30]
-            examples.append(f'  %(prog)s -p "{qa["question"]}" -d ./{dir_name}')
+            examples.append(
+                f'  %(prog)s -p "{qa["question"]}" -o ./{dir_name}')
 
     return "\n".join(examples)
 
@@ -800,7 +860,7 @@ Environment variables:
         help='Natural language prompt to search for photos'
     )
 
-    # Make -a and -d mutually exclusive
+    # Make -a and -o mutually exclusive
     output_group = parser.add_mutually_exclusive_group()
 
     output_group.add_argument(
@@ -808,11 +868,11 @@ Environment variables:
         type=str,
         nargs='?',
         const='text2photos',
-        help='Album name to add photos to (default: text2photos). This is the default if neither -a nor -d is specified.'
+        help='Album name to add photos to (default: text2photos). This is the default if neither -a nor -o is specified.'
     )
 
     output_group.add_argument(
-        '-d', '--directory',
+        '-o', '--output-dir',
         type=str,
         help='Output directory for exported photos (alternative to album)'
     )
@@ -838,20 +898,36 @@ Environment variables:
         help='Model name to use for query generation'
     )
 
+    parser.add_argument(
+        '-e', '--num-examples',
+        type=int,
+        default=-1,
+        help='Number of examples to use in combinations (-1=all examples). Will try all combinations until finding valid results.'
+    )
+
+    parser.add_argument(
+        '-d', '--num-ddls',
+        type=int,
+        default=-1,
+        help='Number of DDLs to use in combinations (-1=all DDLs). Will try all combinations until finding valid results.'
+    )
+
     args = parser.parse_args()
 
     # Default to album mode if neither specified
-    if not args.directory and args.album is None:
+    if not args.output_dir and args.album is None:
         args.album = 'text2photos'
 
     try:
         text_to_photo(
             prompt=args.prompt,
-            output_dir=args.directory,
+            output_dir=args.output_dir,
             album_name=args.album,
             api_base=args.api_base,
             api_key=args.api_key,
-            model=args.model
+            model=args.model,
+            num_examples=args.num_examples,
+            num_ddls=args.num_ddls
         )
     except Exception as e:
         print(f"Error: {e}")
